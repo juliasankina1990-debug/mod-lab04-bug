@@ -3,11 +3,11 @@ using Stateless;
 
 namespace BugPro
 {
-    // Состояния workflow
     public enum BugState
     {
         NewDefect,
         Triage,
+
         NotNow,
         NotFix,
         SeparateSolution,
@@ -15,15 +15,16 @@ namespace BugPro
         OtherProduct,
         NeedMoreInfo,
         CannotReproduce,
+
         Fix,
         OK,
         Closed
     }
 
-    // Триггеры (действия)
     public enum BugTrigger
     {
         Analyze,
+
         Defer,
         WontFix,
         SeparateSolution,
@@ -31,16 +32,20 @@ namespace BugPro
         OtherProduct,
         NeedInfo,
         CannotReproduce,
+
         StartFix,
         Verify,
+
         Yes,
         No,
+
+        Return,     // 🔹 универсальный "возврат"
         Reopen
     }
 
     public class Bug
     {
-        private StateMachine<BugState, BugTrigger> _machine;
+        private readonly StateMachine<BugState, BugTrigger> _machine;
         private BugState _state;
 
         public Bug()
@@ -48,10 +53,11 @@ namespace BugPro
             _machine = new StateMachine<BugState, BugTrigger>(() => _state, s => _state = s);
             _state = BugState.NewDefect;
 
-            // Переходы
+            // Новый дефект → разбор
             _machine.Configure(BugState.NewDefect)
                 .Permit(BugTrigger.Analyze, BugState.Triage);
 
+            // Разбор дефектов
             _machine.Configure(BugState.Triage)
                 .Permit(BugTrigger.Defer, BugState.NotNow)
                 .Permit(BugTrigger.WontFix, BugState.NotFix)
@@ -62,17 +68,46 @@ namespace BugPro
                 .Permit(BugTrigger.CannotReproduce, BugState.CannotReproduce)
                 .Permit(BugTrigger.StartFix, BugState.Fix);
 
+            // 🔁 ВСЕ "боковые" состояния возвращаются в Triage
+
+            _machine.Configure(BugState.NotNow)
+                .Permit(BugTrigger.Return, BugState.Triage);
+
+            _machine.Configure(BugState.NotFix)
+                .Permit(BugTrigger.Return, BugState.Triage);
+
+            _machine.Configure(BugState.SeparateSolution)
+                .Permit(BugTrigger.Return, BugState.Triage);
+
+            _machine.Configure(BugState.Duplicate)
+                .Permit(BugTrigger.Return, BugState.Triage);
+
+            _machine.Configure(BugState.OtherProduct)
+                .Permit(BugTrigger.Return, BugState.Triage);
+
+            _machine.Configure(BugState.NeedMoreInfo)
+                .Permit(BugTrigger.Analyze, BugState.Triage); // получили инфу → снова разбор
+
+            _machine.Configure(BugState.CannotReproduce)
+                .Permit(BugTrigger.Verify, BugState.OK) // проверяем → OK?
+                .Permit(BugTrigger.Return, BugState.Triage);
+
+            // Исправление
             _machine.Configure(BugState.Fix)
                 .Permit(BugTrigger.Verify, BugState.OK);
 
+            // OK? (проверка)
             _machine.Configure(BugState.OK)
                 .Permit(BugTrigger.Yes, BugState.Closed)
-                .Permit(BugTrigger.No, BugState.Fix);
+                .Permit(BugTrigger.No, BugState.Fix)      // не ок → доработка
+                .Permit(BugTrigger.Return, BugState.Triage); // возврат
 
+            // Закрытие
             _machine.Configure(BugState.Closed)
                 .Permit(BugTrigger.Reopen, BugState.Triage);
         }
 
+        // Методы
         public void Analyze() => _machine.Fire(BugTrigger.Analyze);
         public void Defer() => _machine.Fire(BugTrigger.Defer);
         public void WontFix() => _machine.Fire(BugTrigger.WontFix);
@@ -81,10 +116,11 @@ namespace BugPro
         public void OtherProduct() => _machine.Fire(BugTrigger.OtherProduct);
         public void NeedInfo() => _machine.Fire(BugTrigger.NeedInfo);
         public void CannotReproduce() => _machine.Fire(BugTrigger.CannotReproduce);
-        public void StartFix() => _machine.Fire(BugTrigger.StartFix);
+		public void StartFix() => _machine.Fire(BugTrigger.StartFix);
         public void Verify() => _machine.Fire(BugTrigger.Verify);
         public void Yes() => _machine.Fire(BugTrigger.Yes);
         public void No() => _machine.Fire(BugTrigger.No);
+        public void Return() => _machine.Fire(BugTrigger.Return);
         public void Reopen() => _machine.Fire(BugTrigger.Reopen);
 
         public BugState GetState() => _state;
@@ -95,22 +131,20 @@ namespace BugPro
         static void Main(string[] args)
         {
             var bug = new Bug();
-            Console.WriteLine($"Initial state: {bug.GetState()}");
+
+            Console.WriteLine(bug.GetState());
 
             bug.Analyze();
-            Console.WriteLine($"After Analyze: {bug.GetState()}");
-
             bug.StartFix();
-            Console.WriteLine($"After StartFix: {bug.GetState()}");
-
             bug.Verify();
-            Console.WriteLine($"After Verify: {bug.GetState()}");
+            bug.No();       // не ок → обратно в Fix
+            bug.Verify();
+            bug.Yes();      // закрыли
 
-            bug.Yes();
-            Console.WriteLine($"After Yes: {bug.GetState()}");
+            Console.WriteLine(bug.GetState());
 
-            bug.Reopen();
-            Console.WriteLine($"After Reopen: {bug.GetState()}");
+            bug.Reopen();   // переоткрытие
+            Console.WriteLine(bug.GetState());
         }
     }
 }
