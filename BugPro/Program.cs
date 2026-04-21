@@ -1,6 +1,7 @@
 using System;
 using Stateless;
 
+
 namespace BugPro
 {
     public enum BugState
